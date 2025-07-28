@@ -1,0 +1,54 @@
+DATA:
+  INPUT:
+      RRS_412:
+          - name: quantile 
+      RRS_443:
+          - name: quantile  
+      RRS_490:
+          - name: quantile  
+      RRS_510:
+          - name: quantile  
+      RRS_560:
+          - name: quantile  
+      RRS_665:
+          - name: quantile  
+      COSCURRENT:
+          - name: quantile  
+      SINCURRENT:
+          - name: quantile  
+      NORMCURRENT:
+          - name: quantile  
+      SLA : 
+          - name: quantile  
+      SST : 
+          - name: quantile  
+      PAR : 
+          - name: quantile  
+      ADT : 
+          - name: quantile  
+      FSLE: 
+          - name: quantile 
+  OUTPUT: 
+      TChla:
+          - name: select_over_0.001
+          - name: quantile 
+      Micro_Chla:
+          - name: noise_uniform_law
+          - name: quantile 
+      Nano_Chla:
+          - name: noise_uniform_law
+          - name: quantile 
+      Pico_Chla:
+          - name: noise_uniform_law
+          - name: quantile 
+  BENTCHMARCK:
+      CHL:
+          - name: select_over_0.001
+      MICRO:
+          - name: select_over_0.001
+      NANO:
+          - name: select_over_0.001
+      PICO:
+          - name: select_over_0.001
+
+

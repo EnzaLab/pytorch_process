@@ -1,0 +1,65 @@
+DATA:
+  INPUT:
+      RRS_412:
+          - name: yeojohnson
+          - name: standardization 
+      RRS_443:
+          - name: yeojohnson
+          - name: standardization 
+      RRS_490:
+          - name: yeojohnson
+          - name: standardization 
+      RRS_510:
+          - name: yeojohnson
+          - name: standardization 
+      RRS_560:
+          - name: yeojohnson
+          - name: standardization 
+      RRS_665:
+          - name: yeojohnson
+          - name: standardization 
+      COSCURRENT:
+          - name: standardization 
+      SINCURRENT:
+          - name: standardization 
+      NORMCURRENT:
+          - name: yeojohnson
+          - name: standardization 
+      SLA : 
+          - name: standardization 
+      SST : 
+          - name: yeojohnson
+          - name: standardization 
+      PAR : 
+          - name: yeojohnson
+          - name: standardization 
+      ADT : 
+          - name: standardization 
+      FSLE: 
+          - name: yeojohnson
+          - name: standardization 
+  OUTPUT: 
+      TChla:
+          - name: select_over_0.001
+          - name: yeojohnson
+          - name: standardization 
+      Micro_Chla:
+          - name: yeojohnson
+          - name: standardization 
+      Nano_Chla:
+          - name: yeojohnson
+          - name: standardization 
+      Pico_Chla:
+          - name: yeojohnson
+          - name: standardization 
+  BENTCHMARCK:
+      CHL:
+          - name: select_over_0.001
+      MICRO:
+          - name: select_over_0.001
+      NANO:
+          - name: select_over_0.001
+      PICO:
+          - name: select_over_0.001
+
+

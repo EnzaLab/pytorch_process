@@ -1,0 +1,304 @@
+import os
+import pandas as pd 
+import numpy as np
+from tqdm import tqdm
+import plotly.graph_objects as go
+import xarray as xr
+import torch
+import glob
+import torch.nn.functional as F
+import pandas as pd
+import numpy as np
+import random
+import datetime
+import netCDF4
+import os 
+
+from function_extract_cubes import *
+
+
+def safe_open_nc(path_pattern, description, date, login=None):
+    files = glob.glob(path_pattern)
+    if not files:
+        raise FileNotFoundError(f"Aucun fichier {description} trouvé pour la date {date}")
+    file = files[0]
+    if login:
+        file = os.path.join(login, file)
+    return xr.open_dataset(file)
+
+def pad_lat_lon(latitudes, longitudes, max_latitude, max_longitude):
+       
+    # Convertir les latitudes et longitudes directement en tenseurs
+    latitudes = torch.tensor(latitudes, dtype=torch.float32)
+    longitudes = torch.tensor(longitudes, dtype=torch.float32)
+
+    # Vérifier si les latitudes et longitudes sont des tableaux 1D ou 2D
+    if latitudes.ndimension() == 1:
+        latitudes = latitudes.unsqueeze(0)  # Ajouter une dimension (1, N) pour avoir une forme compatible
+    
+    if longitudes.ndimension() == 1:
+        longitudes = longitudes.unsqueeze(0)  
+
+    # Si les latitudes ou longitudes sont vides, les initialiser avec des valeurs par défaut
+    if latitudes.ndimension() == 0:
+        latitudes = latitudes.unsqueeze(0).unsqueeze(0)
+    
+    if longitudes.ndimension() == 0:
+        longitudes = longitudes.unsqueeze(0).unsqueeze(0)
+    
+    # Pad les latitudes si elles sont plus petites que max_latitude
+    if latitudes.size(1) < max_latitude:
+        padding_latitude = max_latitude - latitudes.size(1)
+        # Créer un tenseur de padding compatible en dimension
+        padding_tensor_latitude = torch.full((latitudes.size(0), padding_latitude), 9999, dtype=torch.float32)
+        latitudes = torch.cat([latitudes, padding_tensor_latitude], dim=1)
+
+    # Pad les longitudes si elles sont plus petites que max_longitude
+    if longitudes.size(1) < max_longitude:
+        padding_longitude = max_longitude - longitudes.size(1)
+        # Créer un tenseur de padding compatible en dimension
+        padding_tensor_longitude = torch.full((longitudes.size(0), padding_longitude), 9999, dtype=torch.float32)
+        longitudes = torch.cat([longitudes, padding_tensor_longitude], dim=1)
+
+    return latitudes, longitudes
+
+def pad_to_max_size(data, max_latitude, max_longitude):
+            data = torch.tensor(data.values, dtype=torch.float32)
+            
+            if data.ndimension() < 3:
+                if data.ndimension() == 1:
+                    data = data.unsqueeze(0).unsqueeze(0)
+                elif data.ndimension() == 2:
+                    data = data.unsqueeze(0)
+            if data.shape[1] < max_latitude:
+                padding_latitude = max_latitude - data.shape[1]
+                data = F.pad(data, (0, 0, 0, padding_latitude), value=9999)
+            
+            if data.shape[2] < max_longitude:
+                padding_longitude = max_longitude - data.shape[2]
+                data = F.pad(data, (0, padding_longitude, 0, 0), value=9999)
+                
+            return data
+
+def point_space_boundaries(lat, lon, buf): 
+    """
+    MADE for running in a CPU
+    """    
+    
+    from geopy.distance import geodesic
+    
+    #right
+    boundaries = geodesic(kilometers=buf[0]).destination((lat, lon),0)
+    lat_r = boundaries.latitude
+    #left
+    boundaries = geodesic(kilometers=buf[1]).destination((lat, lon),180)
+    lat_l = boundaries.latitude
+    #up
+    boundaries = geodesic(kilometers=buf[0]).destination((lat, lon),90)
+    lon_u = boundaries.longitude
+    #down
+    boundaries = geodesic(kilometers=buf[1]).destination((lat, lon),-90)
+    lon_d = boundaries.longitude
+    
+    tolerance = 0.1
+    if lon_d>lon_u: 
+        if (lon_u+179.9999<tolerance):
+            lon_list = [[lon_d, 179.9999]]
+            lat_list = [[lat_l, lat_r]]
+        elif (lon_d-179.9999<tolerance): 
+            lon_list = [[-179.9999, lon_u]]
+            lat_list = [[lat_l, lat_r]]
+        else : 
+            lon_list = [[lon_d, 179.9999], [-179.9999, lon_u]]
+            lat_list = [[lat_l, lat_r], [lat_l, lat_r]]
+    else : 
+        lat_list = [[lat_l, lat_r]]
+        lon_list = [[lon_d, lon_u]]
+        
+
+    return lat_list, lon_list
+
+def selective_data(dataset, var, lat_range, lon_range, lat_name="latitude", lon_name="longitude", method="NaN"):
+    
+    if method == "inverse":
+        subset = dataset[var].sel(**{
+            lat_name: slice(lat_range[0], lat_range[1]),
+            lon_name: slice(lon_range[0], lon_range[1]),
+        })
+    elif method == "fsle":
+        lon_range = [(lon + 360) % 360 if lon < 0 else lon for lon in lon_range]
+        subset = dataset[var].sel(**{
+            lat_name: slice(lat_range[0], lat_range[1]),
+            lon_name: slice(lon_range[0], lon_range[1]),
+        })
+    
+    else : 
+        subset = dataset[var].sel(**{
+            lat_name: slice(lat_range[1], lat_range[0]),
+            lon_name: slice(lon_range[0], lon_range[1]),
+        })       
+    if subset.size == 0: 
+        subset = dataset[var].sel(**{
+            lat_name: dataset[lat_name].sel({lat_name: lat_range[0]}, method="nearest"),
+            lon_name: dataset[lon_name].sel({lon_name: lon_range[0]}, method="nearest"),
+        })
+
+    # Récupération des coordonnées complètes de latitude et longitude du subset
+    lat_values = subset[lat_name].values
+    lon_values = subset[lon_name].values
+
+    return subset, lat_values, lon_values
+
+def apply_physical_data(login, df, buf, max_latitude, max_longitude, max_time): 
+    path_plk = f'{login}/complex/share/c3s/NCDF/OCEANCOLOUR_GLO_BGC_L3_MY_009_107/c3s_obs-oc_glo_bgc-plankton_my_l3-multi-4km_P1D'
+    path_rrs = f'{login}/complex/share/c3s/NCDF/OCEANCOLOUR_GLO_BGC_L3_MY_009_107/c3s_obs-oc_glo_bgc-reflectance_my_l3-multi-4km_P1D'
+    path_sst = f'{login}/complex/share/cmems_raw/SST-GLO-SST-L4-REP-OBSERVATIONS-010-024/'
+    path_sla = f'{login}/complex/share/cmems_raw/SEALEVEL_GLO_PHY_L4_MY_008_047/cmems_obs-sl_glo_phy-ssh_my_allsat-l4-duacs-0.125deg_P1D/'
+    path_par = f'{login}/complex/share/c3s/PAR_Acri/ftp.hermes.acri.fr/GLOB/merged/day/'
+    path_fsle = f'{login}/complex/share/c3s/Aviso_FSLE/ftp-access.aviso.altimetry.fr/value-added/lyapunov/delayed-time/global'
+    path_bathy_completed = f'{login}/complex/share/save_training_Enza/GEBCO_2023_sub_ice_topo.nc'
+    
+    tensor_list = [] 
+    latitudes_list = []
+    longitudes_list = []
+    rows_complete = []
+
+    for index, row in tqdm(df.iterrows(), total=len(df), desc="Traitement des données"):
+        lat = row['Lat']
+        lon = row['Lon']
+        lat_inter, lon_inter = point_space_boundaries(lat, lon, buf)
+        date = row['date']
+        year, month, day = from_date_to_year_month_day(date)
+
+        try:
+            path_rrs_completed = os.path.join(path_rrs, f"{year}/{month}/{year}{month}{day}_c3s_obs*.nc")
+            path_plk_completed = os.path.join(path_plk, f"{year}/{month}/{year}{month}{day}_c3s_obs*.nc")
+            ds_rrs = safe_open_nc(path_rrs_completed, "RRS", date)
+            ds_plk = safe_open_nc(path_plk_completed, "PLK", date)
+        except Exception:
+            rows_complete.append(False)
+            continue
+
+        try:
+            path_sla_completed = os.path.join(path_sla, f"{year}/{month}/dt_global_allsat_phy_l4_{year}{month}{day}*.nc")
+            ds_sla = safe_open_nc(path_sla_completed, "SLA", date)
+        except Exception:
+            rows_complete.append(False)
+            continue
+
+        try:
+            path_sst_completed = os.path.join(path_sst, f"{year}/{month}/{year}{month}{day}*.nc")
+            ds_sst = safe_open_nc(path_sst_completed, "SST", date)
+        except Exception:
+            rows_complete.append(False)
+            continue
+
+        try:
+            path_par_completed = os.path.join(path_par, f"{year}/{month}/{day}/L3m_{year}{month}{day}*.nc")
+            ds_par = safe_open_nc(path_par_completed, "PAR", date)
+        except Exception:
+            rows_complete.append(False)
+            continue
+
+        try:
+            ds_bathy = xr.open_dataset(path_bathy_completed)
+        except Exception:
+            rows_complete.append(False)
+            continue
+
+        try:
+            path_fsle_completed = os.path.join(path_fsle, f"{year}/dt_global_allsat_madt_fsle_{year}{month}{day}*.nc")
+            ds_fsle = safe_open_nc(path_fsle_completed, "FSLE", date, login=login)
+        except Exception:
+            rows_complete.append(False)
+            continue
+
+        # Extraction des données (supposé que les fonctions existent déjà)
+        RRS412_subset, RRS_lat, RRS_lon = selective_data(ds_rrs, "RRS412", lat_inter[0], lon_inter[0])
+        RRS443_subset, _, _ = selective_data(ds_rrs, "RRS443", lat_inter[0], lon_inter[0])
+        RRS490_subset, _, _ = selective_data(ds_rrs, "RRS490", lat_inter[0], lon_inter[0])
+        RRS510_subset, _, _ = selective_data(ds_rrs, "RRS510", lat_inter[0], lon_inter[0])
+        RRS560_subset, _, _ = selective_data(ds_rrs, "RRS560", lat_inter[0], lon_inter[0])
+        RRS665_subset, _, _ = selective_data(ds_rrs, "RRS665", lat_inter[0], lon_inter[0])
+
+        CHL_subset, CHL_lat, CHL_lon = selective_data(ds_plk, "CHL", lat_inter[0], lon_inter[0])
+        MICRO_subset, _, _ = selective_data(ds_plk, "MICRO", lat_inter[0], lon_inter[0])
+        NANO_subset, _, _ = selective_data(ds_plk, "NANO", lat_inter[0], lon_inter[0])
+        PICO_subset, _, _ = selective_data(ds_plk, "PICO", lat_inter[0], lon_inter[0])
+
+        sla_subset, SLA_lat, SLA_lon = selective_data(ds_sla, "sla", lat_inter[0], lon_inter[0], method="inverse")
+        adt_subset, _, _ = selective_data(ds_sla, "adt", lat_inter[0], lon_inter[0], method="inverse")
+        ugos_subset, _, _ = selective_data(ds_sla, "ugos", lat_inter[0], lon_inter[0], method="inverse")
+        vgos_subset, _, _ = selective_data(ds_sla, "vgos", lat_inter[0], lon_inter[0], method="inverse")
+
+        sst_subset, SST_lat, SST_lon = selective_data(ds_sst, "analysed_sst", lat_inter[0], lon_inter[0], "lat", "lon", method="inverse")
+        par_subset, PAR_lat, PAR_lon = selective_data(ds_par, "PAR_mean", lat_inter[0], lon_inter[0], "lat", "lon")
+        fsle_subset, FSLE_lat, FSLE_lon = selective_data(ds_fsle, "fsle_max", lat_inter[0], lon_inter[0], "lat", "lon", method="fsle") 
+
+        bathy_subset, BATHY_lat, BATHY_lon = selective_data(ds_bathy, 'elevation', lat_inter[0], lon_inter[0], "lat", "lon", method="inverse")
+        bathy_subset = bathy_subset[::10,::10]
+        BATHY_lat = BATHY_lat[::10]
+        BATHY_lon = BATHY_lon[::10]
+
+        rows_complete.append(True)
+
+        # Pad des coordonnées
+        RRS_lat, RRS_lon = pad_lat_lon(RRS_lat, RRS_lon, max_latitude, max_longitude)
+        CHL_lat, CHL_lon = pad_lat_lon(CHL_lat, CHL_lon, max_latitude, max_longitude)
+        SLA_lat, SLA_lon = pad_lat_lon(SLA_lat, SLA_lon, max_latitude, max_longitude)
+        SST_lat, SST_lon = pad_lat_lon(SST_lat, SST_lon, max_latitude, max_longitude)
+        PAR_lat, PAR_lon = pad_lat_lon(PAR_lat, PAR_lon, max_latitude, max_longitude)
+        FSLE_lat, FSLE_lon = pad_lat_lon(FSLE_lat, FSLE_lon, max_latitude, max_longitude)
+        BATHY_lat, BATHY_lon = pad_lat_lon(BATHY_lat, BATHY_lon, max_latitude, max_longitude)
+
+        latitudes_list.extend([SLA_lat, SST_lat, PAR_lat, FSLE_lat, RRS_lat, CHL_lat, BATHY_lat])
+        longitudes_list.extend([SLA_lon, SST_lon, PAR_lon, FSLE_lon, RRS_lon, CHL_lon, BATHY_lon])
+
+        # Padding des données
+        padded_data = [pad_to_max_size(d, max_latitude, max_longitude) for d in [
+            sla_subset, adt_subset, ugos_subset, vgos_subset,
+            sst_subset, par_subset, fsle_subset,
+            RRS412_subset, RRS443_subset, RRS490_subset, RRS510_subset,
+            RRS560_subset, RRS665_subset,
+            CHL_subset, MICRO_subset, NANO_subset, PICO_subset,
+            bathy_subset
+        ]]
+
+        data_tensor = torch.stack(padded_data, dim=0)
+        tensor_list.append(data_tensor)
+
+    df_filtered = df[rows_complete].reset_index(drop=True)
+    final_tensor = torch.cat(tensor_list, dim=0)
+
+    latitudes_tensor = torch.stack(latitudes_list, dim=0).permute(1, 0, 2)
+    longitudes_tensor = torch.stack(longitudes_list, dim=0).permute(1, 0, 2)
+        
+    final_tensor_test = final_tensor.reshape(df_filtered.shape[0], 18, max_time, max_latitude, max_longitude)
+    latitudes_tensor_test = latitudes_tensor.reshape(df_filtered.shape[0], 7, max_latitude)
+    longitudes_tensor_test = longitudes_tensor.reshape(df_filtered.shape[0], 7, max_longitude)
+
+    return final_tensor, df_filtered, latitudes_tensor, longitudes_tensor
+
+def main():
+    bathy = 500
+    df = pd.read_csv(f'./add_data/bathy_{bathy}/random_data.csv')
+    
+    login = '/home/elabourdette'
+    space_buffer = 200
+    date_buffer  = 1
+    df = df.rename(columns={"lat":"Lat","lon":"Lon"})   
+    buf = [space_buffer, space_buffer]
+    max_latitude = 100
+    max_longitude = 500
+    max_time = 1
+    final_tensor_test, df_filtered, latitudes_tensor_test, longitudes_tensor_test = apply_physical_data(login, df, buf, max_latitude, max_longitude, max_time)
+
+    
+    torch.save(latitudes_tensor_test, "./add_data/bathy_500/add_data_latitude_space_200.pt")
+    torch.save(longitudes_tensor_test, "./add_data/bathy_500/add_data_longitude_space_200.pt")
+    torch.save(final_tensor_test, "./add_data/bathy_500/add_data_picture_space_200.pt")
+    df_filtered.to_csv(f'./add_data/bathy_{bathy}/random_data.csv')
+
+
+if __name__ == "__main__":
+    main()

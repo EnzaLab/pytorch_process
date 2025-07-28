@@ -1,0 +1,75 @@
+DATA:
+  INPUT:
+      RRS_412:
+          - name: threshold
+          - name: log10
+          - name: standardization 
+      RRS_443:
+          - name: threshold
+          - name: log10
+          - name: standardization   
+      RRS_490:
+          - name: threshold
+          - name: log10
+          - name: standardization 
+      RRS_510:
+          - name: threshold
+          - name: log10
+          - name: standardization 
+      RRS_560:
+          - name: threshold
+          - name: log10
+          - name: standardization 
+      RRS_665:
+          - name: threshold
+          - name: log10
+          - name: standardization 
+      COSCURRENT:
+          - name: standardization 
+      SINCURRENT:
+          - name: standardization 
+      NORMCURRENT:
+          - name: standardization 
+      SLA : 
+          - name: standardization 
+      SST : 
+          - name: standardization 
+      PAR : 
+          - name: standardization 
+      ADT : 
+          - name: standardization 
+      FSLE: 
+          - name: standardization 
+  OUTPUT: 
+      TChla:
+          - name: select_over_0.001
+          - name: log10
+          - name: standardization     
+      Micro_Chla:
+          - name: threshold
+          - name: log10
+          - name: standardization   
+      Nano_Chla:
+          - name: threshold
+          - name: log10
+          - name: standardization   
+      Pico_Chla:
+          - name: threshold
+          - name: log10
+          - name: standardization   
+  BENTCHMARCK:
+      CHL:
+          - name: log10
+          - name: standardization
+      MICRO:
+          - name: log10
+          - name: standardization
+      NANO:
+          - name: log10
+          - name: standardization
+      PICO:
+          - name: log10
+          - name: standardization
+
+    # Add treatement pfts 
+
