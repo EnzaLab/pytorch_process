@@ -385,3 +385,40 @@ def plot_loss(LOSS_TRAIN, LOSS_VAL, title, save_path=None, metric="RMSE"):
 
     plt.show()
     plt.close()
+    
+def plot_loss_zoom(LOSS_TRAIN, LOSS_VAL, title, save_path=None, metric="RMSE"):
+        # Style based on metric
+        if metric.upper() == "MAPD":
+            color_train = '#ff914d'
+            color_val = '#ffbd59'
+            ylabel = 'MAPD (%)'
+            full_title = f'MAPD (Zoom 0-2) - {title}'
+        else:  # RMSE (default)
+            color_train = '#86b499'
+            color_val = '#B6EBCC'
+            ylabel = 'RMSE'
+            full_title = f'Loss function (RMSE, Zoom 0-2) - {title}'
+
+        epoch_train = range(1, len(LOSS_TRAIN) + 1)
+        epoch_val = range(1, len(LOSS_TRAIN) + 1, 2)
+
+        plt.plot(epoch_train, LOSS_TRAIN, marker='o', linestyle='-', color=color_train, label='Train')
+        plt.plot(epoch_val, LOSS_VAL, marker='o', linestyle='-', color=color_val, label='Validation')
+
+        plt.xlabel('Epoch')
+        plt.ylabel(ylabel)
+        plt.grid(True)
+        plt.legend()
+        plt.title(full_title)
+        plt.ylim(0, 2)
+
+        if save_path:
+            base, _ = os.path.splitext(save_path)
+            png_path = base + "_zoom.png"
+            pdf_path = base + "_zoom.pdf"
+            plt.savefig(png_path, bbox_inches='tight')
+            plt.savefig(pdf_path, bbox_inches='tight')
+            print(f"Zoom plot saved as:\n  • {png_path}\n  • {pdf_path}")
+
+        plt.show()
+        plt.close()
